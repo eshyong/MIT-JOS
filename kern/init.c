@@ -38,7 +38,7 @@ i386_init(void)
     cprintf("H%x Wo%s\n", 57616, &i);
 
 	// Test the stack backtrace function (lab 1 only)
-    // test_backtrace(5);
+    test_backtrace(5);
     // mischief_managed();
 
 	// Drop into the kernel monitor.
