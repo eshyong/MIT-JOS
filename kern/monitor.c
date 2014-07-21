@@ -24,6 +24,7 @@ struct Command {
 static struct Command commands[] = {
 	{ "help", "Display this list of commands", mon_help },
 	{ "kerninfo", "Display information about the kernel", mon_kerninfo },
+    { "backtrace", "Displays a backtrace of function calls on the stack", mon_backtrace },
 };
 #define NCOMMANDS (sizeof(commands)/sizeof(commands[0]))
 
@@ -55,10 +56,41 @@ mon_kerninfo(int argc, char **argv, struct Trapframe *tf)
 	return 0;
 }
 
+void 
+mischief_managed() {
+    // Self-modifying code mischief!
+    uintptr_t ebp = (uintptr_t) read_ebp();
+    uintptr_t **eip = (uintptr_t **) (ebp + 4);
+
+    // Since x86 is little endian, our instruction should look like:
+    // 0x00     00     c3     c9
+    //   ADD    ADD    RET    LEAVE
+    uint32_t mischief = (0xc3 << 8) | (0xc9); 
+    **eip = mischief;
+    cprintf("Mischief managed!");
+}
+
 int
 mon_backtrace(int argc, char **argv, struct Trapframe *tf)
 {
-	// Your code here.
+    uintptr_t *ebp = (uintptr_t *) read_ebp();
+    uintptr_t eip = ebp[1];
+    struct Eipdebuginfo info;
+    cprintf("Stack backtrace:\n");
+
+    // Keep tracing until %ebp is NULL, which was the initial value of %ebp at boot time.
+    while (ebp != NULL) {
+        // Print out %ebp, %eip, and arguments.
+        cprintf("  ebp %08x eip %08x args %08x %08x %08x %08x %08x\n", ebp, eip, ebp[2], ebp[3], ebp[4], ebp[5], ebp[6]);
+
+        // Get function debugging info from %eip (ebp[1]).
+        debuginfo_eip((uintptr_t) eip, &info);
+        cprintf("\t  %s:%u: %.*s+%u\n", info.eip_file, info.eip_line, info.eip_fn_namelen, info.eip_fn_name, eip - info.eip_fn_addr);
+
+        // Get next values of %ebp and %eip.
+        ebp = (uintptr_t *) ebp[0];
+        eip = ebp[1];
+    }
 	return 0;
 }
 

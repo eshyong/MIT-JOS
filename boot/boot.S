@@ -73,13 +73,13 @@ spin:
   jmp spin
 
 # Bootstrap GDT
-.p2align 2                                # force 4 byte alignment
+.p2align 2                              # force 4 byte alignment
 gdt:
-  SEG_NULL				# null seg
-  SEG(STA_X|STA_R, 0x0, 0xffffffff)	# code seg
-  SEG(STA_W, 0x0, 0xffffffff)	        # data seg
+  SEG_NULL                              # null seg
+  SEG(STA_X|STA_R, 0x0, 0xffffffff)     # code seg
+  SEG(STA_W, 0x0, 0xffffffff)           # data seg
 
 gdtdesc:
-  .word   0x17                            # sizeof(gdt) - 1
-  .long   gdt                             # address gdt
+  .word   0x17                          # sizeof(gdt) - 1
+  .long   gdt                           # address gdt
 
