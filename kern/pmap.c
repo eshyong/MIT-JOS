@@ -158,10 +158,10 @@ mem_init(void)
 
     check_page_free_list(1);
     check_page_alloc();
-    // Remove this line when you're ready to test this function.
-    panic("mem_init: This function is not finished\n");
     check_page();
 
+    // Remove this line when you're ready to test this function.
+    panic("mem_init: This function is not finished\n");
     //////////////////////////////////////////////////////////////////////
     // Now we set up virtual memory
 
@@ -366,11 +366,13 @@ page_decref(struct PageInfo* pp)
 pte_t *
 pgdir_walk(pde_t *pgdir, const void *va, int create)
 {
+    // First get the page directory entry, then add the page table index 
+    // to the result.
     struct PageInfo *new_page;
-    pte_t *result = (pte_t *) KADDR(PTE_ADDR(pgdir[PDX(va)])) + PTX(va); 
+    pte_t *result = (pte_t *) KADDR(PTE_ADDR(pgdir[PDX(va)])) + PTX(va);
 
     // If page is not found in the directory and create is set, try page_alloc().
-    if (result == NULL && create == 1) {
+    if ((*result & 0) == 0 && create == 1) {
         new_page = page_alloc(0);
         if (new_page != NULL) {
             result = (pte_t *) KADDR(PTE_ADDR(page2pa(new_page)));
@@ -392,7 +394,10 @@ pgdir_walk(pde_t *pgdir, const void *va, int create)
 static void
 boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm)
 {
-    // Fill this function in
+    // Get a page table entry, then map it with permissions.
+    pte_t *tab_entry = pgdir_walk(pgdir, (void *) va, 1);
+    *tab_entry = PADDR((void *) va) | perm | PTE_P;
+    cprintf("%08x\n", *tab_entry);
 }
 
 //
@@ -442,7 +447,15 @@ struct PageInfo *
 page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
 {
     // Fill this function in
-    return NULL;
+    pte_t *entry = pgdir_walk(pgdir, va, 0);
+    if ((*entry & 1) == 0) {
+        entry = NULL;
+    }
+    if (pte_store != NULL) {
+        (*pte_store) = entry;
+    }
+    cprintf("page_lookup: %08x\n", (*entry & 1));
+    return pa2page(PTE_ADDR(entry));
 }
 
 //
