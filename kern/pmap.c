@@ -369,15 +369,20 @@ pgdir_walk(pde_t *pgdir, const void *va, int create)
     // First get the page directory entry, then add the page table index 
     // to the result.
     struct PageInfo *new_page;
-    pte_t *result = (pte_t *) KADDR(PTE_ADDR(pgdir[PDX(va)])) + PTX(va);
+    pte_t *result = (pte_t *) PTE_ADDR(pgdir[PDX(va)]);
 
     // If page is not found in the directory and create is set, try page_alloc().
-    if ((*result & 0) == 0 && create == 1) {
+    if (result == NULL && create) {
         new_page = page_alloc(0);
         if (new_page != NULL) {
-            result = (pte_t *) KADDR(PTE_ADDR(page2pa(new_page)));
+            result = (pte_t *) PTE_ADDR(page2pa(new_page));
+            result += PTX(va);
         }
     }
+    if (result != NULL) {
+        result += PTX(va);
+    }
+    cprintf("pgdir_walk: %p\n", result);
     return result;
 }
 
@@ -428,7 +433,24 @@ boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm
 int
 page_insert(pde_t *pgdir, struct PageInfo *pp, void *va, int perm)
 {
-    // Fill this function in
+    // Remove page at va, if it's already there.
+    page_remove(pgdir, va);
+
+    // Look for the page entry. If null, we are out of memory.
+    pte_t *result = pgdir_walk(pgdir, va, 1);
+    if (result == NULL) {
+        return -E_NO_MEM;
+    }
+
+    // Set bits, increment ppref, and insert into the table.
+    pp->pp_ref++;
+    result = (pte_t *) ((int) result | perm | PTE_P);
+    pgdir[PDX(va)] = (pde_t) result;
+    cprintf("result: %08x\n", result);
+    pte_t *vresult = KADDR(PTE_ADDR(result));
+    cprintf("vresult[PTX(va)]: %08x\n", vresult[PTX(va)]);
+    cprintf("page_insert: result %08x\n", pgdir[PDX(va)]);
+
     return 0;
 }
 
@@ -446,16 +468,19 @@ page_insert(pde_t *pgdir, struct PageInfo *pp, void *va, int perm)
 struct PageInfo *
 page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
 {
-    // Fill this function in
     pte_t *entry = pgdir_walk(pgdir, va, 0);
-    if ((*entry & 1) == 0) {
-        entry = NULL;
+    struct PageInfo *result = NULL;
+
+    // Check for valid page.
+    if (entry) {
+        result = pa2page((physaddr_t) (*entry + PGOFF(va)));
+        if (pte_store) {
+            (*pte_store) = entry;
+        }
     }
-    if (pte_store != NULL) {
-        (*pte_store) = entry;
-    }
-    cprintf("page_lookup: %08x\n", (*entry & 1));
-    return pa2page(PTE_ADDR(entry));
+    cprintf("page_lookup: %08x\n", (entry));
+    cprintf("result: %08x\n", result);
+    return result;
 }
 
 //
@@ -476,7 +501,15 @@ page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
 void
 page_remove(pde_t *pgdir, void *va)
 {
-    // Fill this function in
+    pte_t *pte_store;
+    struct PageInfo *page = page_lookup(pgdir, va, &pte_store);
+    
+    // Remove page and invalidate TLB.
+    if (page) {
+        page_decref(page);
+        pgdir[PDX(va)] = 0;
+        tlb_invalidate(pgdir, va);
+    }
 }
 
 //
@@ -694,12 +727,15 @@ check_va2pa(pde_t *pgdir, uintptr_t va)
 {
     pte_t *p;
 
-    pgdir = &pgdir[PDX(va)];
-    if (!(*pgdir & PTE_P))
+    pde_t entry = pgdir[PDX(va)];
+    cprintf("check_va2pa entry: %08x\n", pgdir[PDX(va)]);
+    if (!(entry & PTE_P))
         return ~0;
-    p = (pte_t*) KADDR(PTE_ADDR(*pgdir));
+    p = (pte_t*) KADDR(PTE_ADDR(entry));
+    cprintf("check_va2pa p: %08x\n", p);
     if (!(p[PTX(va)] & PTE_P))
         return ~0;
+    cprintf("check_va2pa p[PTX(va)]: %08x\n", PTE_ADDR(p[PTX(va)]));
     return PTE_ADDR(p[PTX(va)]);
 }
 
@@ -741,7 +777,10 @@ check_page(void)
     // free pp0 and try again: pp0 should be used for page table
     page_free(pp0);
     assert(page_insert(kern_pgdir, pp1, 0x0, PTE_W) == 0);
+    cprintf("PTE_ADDR(kern_pgdir[0]): %08x, page2pa(pp0): %08x\n", PTE_ADDR(kern_pgdir[0]), page2pa(pp0));
     assert(PTE_ADDR(kern_pgdir[0]) == page2pa(pp0));
+    cprintf("check_va2pa(kern_pgdir, 0x0): %08x, page2pa(pp1): %08x, kern_pgdir: %08x, pp1: %08x\n", check_va2pa(kern_pgdir, 0x0), page2pa(pp1), kern_pgdir, pp1);
+    cprintf("pages: %08x\n", pages);
     assert(check_va2pa(kern_pgdir, 0x0) == page2pa(pp1));
     assert(pp1->pp_ref == 1);
     assert(pp0->pp_ref == 1);
