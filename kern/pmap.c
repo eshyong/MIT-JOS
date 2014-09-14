@@ -131,6 +131,7 @@ mem_init(void)
     // create initial page directory.
     kern_pgdir = (pde_t *) boot_alloc(PGSIZE);
     memset(kern_pgdir, 0, PGSIZE);
+    cprintf("\nkern_pgdir: 0x%08x\n", kern_pgdir);
 
     //////////////////////////////////////////////////////////////////////
     // Recursively insert PD in itself as a page table, to form
@@ -147,6 +148,8 @@ mem_init(void)
     // each physical page, there is a corresponding struct PageInfo in this
     // array.  'npages' is the number of physical pages in memory.
     pages = (struct PageInfo *) boot_alloc(sizeof(struct PageInfo) * npages);
+    cprintf("sizeof(uintptr_t): %d\n", sizeof(uintptr_t));
+    cprintf("\npages: 0x%08x\n", pages);
 
     //////////////////////////////////////////////////////////////////////
     // Now that we've allocated the initial kernel data structures, we set
@@ -162,6 +165,7 @@ mem_init(void)
 
     // Remove this line when you're ready to test this function.
     panic("mem_init: This function is not finished\n");
+
     //////////////////////////////////////////////////////////////////////
     // Now we set up virtual memory
 
@@ -172,7 +176,6 @@ mem_init(void)
     //      (ie. perm = PTE_U | PTE_P)
     //    - pages itself -- kernel RW, user NONE
     // Your code goes here:
-    
 
     //////////////////////////////////////////////////////////////////////
     // Use the physical memory that 'bootstack' refers to as the kernel
@@ -212,8 +215,8 @@ mem_init(void)
     // entry.S set the really important flags in cr0 (including enabling
     // paging).  Here we configure the rest of the flags that we care about.
     cr0 = rcr0();
-    cr0 |= CR0_PE|CR0_PG|CR0_AM|CR0_WP|CR0_NE|CR0_MP;
-    cr0 &= ~(CR0_TS|CR0_EM);
+    cr0 |= CR0_PE | CR0_PG | CR0_AM | CR0_WP | CR0_NE | CR0_MP;
+    cr0 &= ~(CR0_TS | CR0_EM);
     lcr0(cr0);
 
     // Some more checks, only possible after kern_pgdir is installed.
@@ -337,8 +340,9 @@ page_free(struct PageInfo *pp)
 void
 page_decref(struct PageInfo* pp)
 {
-    if (--pp->pp_ref == 0)
+    if (--pp->pp_ref == 0) {
         page_free(pp);
+    }
 }
 
 // Given 'pgdir', a pointer to a page directory, pgdir_walk returns
@@ -366,23 +370,42 @@ page_decref(struct PageInfo* pp)
 pte_t *
 pgdir_walk(pde_t *pgdir, const void *va, int create)
 {
-    // First get the page directory entry, then add the page table index 
-    // to the result.
-    struct PageInfo *new_page;
-    pte_t *result = (pte_t *) PTE_ADDR(pgdir[PDX(va)]);
+    cprintf("\nEntering pgdir_walk\n");
+    struct PageInfo *new_page_table;
+    pte_t *result;
+    physaddr_t table_addr = 0x0;
 
-    // If page is not found in the directory and create is set, try page_alloc().
-    if (result == NULL && create) {
-        new_page = page_alloc(0);
-        if (new_page != NULL) {
-            result = (pte_t *) PTE_ADDR(page2pa(new_page));
-            result += PTX(va);
+    // Reference the page directory array.
+    pde_t dir_entry = pgdir[PDX(va)];
+    cprintf("dir_entry: 0x%08x\n", dir_entry);
+
+    // If page table is not found in the directory and create is set, try page_alloc().
+    if (dir_entry & PTE_P) { 
+        // Table is already present.
+        table_addr = PTE_ADDR(dir_entry);
+    } else {
+        if (!create) {
+            // For lookups only.
+            return NULL;
         }
+        // Allocate a new page table.
+        new_page_table = page_alloc(ALLOC_ZERO);
+        if (!new_page_table) {
+            // Allocation failed, exit.
+            return NULL;
+        }
+        // Increment reference count and set page directory to point to page table's physical address.
+        cprintf("new_page_table: 0x%08x\n", new_page_table);
+        new_page_table->pp_ref++;
+        table_addr = page2pa(new_page_table);
+        pgdir[PDX(va)] = table_addr | PTE_P | PTE_W;
     }
-    if (result != NULL) {
-        result += PTX(va);
-    }
-    cprintf("pgdir_walk: %p\n", result);
+    cprintf("table_addr: 0x%08x\n", table_addr);
+
+    // Since our table address is a physical address, we need to index into it using PTX times 
+    // physaddr_t. This ensures that addresses are aligned on 2-byte boundaries.
+    result = (pte_t *) KADDR(table_addr + sizeof(physaddr_t) * PTX(va));
+    cprintf("result: 0x%08x\n\n", result);
     return result;
 }
 
@@ -402,7 +425,6 @@ boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm
     // Get a page table entry, then map it with permissions.
     pte_t *tab_entry = pgdir_walk(pgdir, (void *) va, 1);
     *tab_entry = PADDR((void *) va) | perm | PTE_P;
-    cprintf("%08x\n", *tab_entry);
 }
 
 //
@@ -433,23 +455,20 @@ boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm
 int
 page_insert(pde_t *pgdir, struct PageInfo *pp, void *va, int perm)
 {
-    // Remove page at va, if it's already there.
-    page_remove(pgdir, va);
-
-    // Look for the page entry. If null, we are out of memory.
-    pte_t *result = pgdir_walk(pgdir, va, 1);
-    if (result == NULL) {
+    // Look for the page table entry.
+    int create = 1;
+    pte_t *table_entry = pgdir_walk(pgdir, va, create);
+    
+    // No page table exists and we don't have enough memory to create one.
+    if (table_entry == NULL) {
         return -E_NO_MEM;
     }
-
-    // Set bits, increment ppref, and insert into the table.
+    if (*table_entry & PTE_P) {
+        // Remove page from table before creating a new mapping.
+        page_remove(pgdir, va);
+    }
+    *table_entry = page2pa(pp) | PTE_P | perm; 
     pp->pp_ref++;
-    result = (pte_t *) ((int) result | perm | PTE_P);
-    pgdir[PDX(va)] = (pde_t) result;
-    cprintf("result: %08x\n", result);
-    pte_t *vresult = KADDR(PTE_ADDR(result));
-    cprintf("vresult[PTX(va)]: %08x\n", vresult[PTX(va)]);
-    cprintf("page_insert: result %08x\n", pgdir[PDX(va)]);
 
     return 0;
 }
@@ -468,19 +487,18 @@ page_insert(pde_t *pgdir, struct PageInfo *pp, void *va, int perm)
 struct PageInfo *
 page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
 {
-    pte_t *entry = pgdir_walk(pgdir, va, 0);
-    struct PageInfo *result = NULL;
-
-    // Check for valid page.
-    if (entry) {
-        result = pa2page((physaddr_t) (*entry + PGOFF(va)));
-        if (pte_store) {
-            (*pte_store) = entry;
-        }
+    // Look up page table but don't create a new one.
+    struct PageInfo *page;
+    pte_t *table_entry = pgdir_walk(pgdir, va, 0);
+    if (table_entry == NULL) {
+        return NULL;
     }
-    cprintf("page_lookup: %08x\n", (entry));
-    cprintf("result: %08x\n", result);
-    return result;
+    // Use PTE_ADDR to remove flags, and convert to a page pointer.
+    page = pa2page(PTE_ADDR(*table_entry));
+    if (pte_store != NULL) {
+        *pte_store = table_entry;
+    }
+    return page;
 }
 
 //
@@ -501,13 +519,15 @@ page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
 void
 page_remove(pde_t *pgdir, void *va)
 {
-    pte_t *pte_store;
-    struct PageInfo *page = page_lookup(pgdir, va, &pte_store);
-    
-    // Remove page and invalidate TLB.
+    cprintf("\nEntering page_remove\n");
+    pte_t *table_entry;
+    struct PageInfo *page = page_lookup(pgdir, va, &table_entry);
     if (page) {
+        // Decrement/free page, reset table entry, and invalidate TLB entry.
+        cprintf("page: 0x%08x\n", page);
         page_decref(page);
-        pgdir[PDX(va)] = 0;
+        cprintf("page_free_list: 0x%08x\n", page_free_list);
+        *table_entry = 0x0;
         tlb_invalidate(pgdir, va);
     }
 }
@@ -728,14 +748,11 @@ check_va2pa(pde_t *pgdir, uintptr_t va)
     pte_t *p;
 
     pde_t entry = pgdir[PDX(va)];
-    cprintf("check_va2pa entry: %08x\n", pgdir[PDX(va)]);
     if (!(entry & PTE_P))
         return ~0;
     p = (pte_t*) KADDR(PTE_ADDR(entry));
-    cprintf("check_va2pa p: %08x\n", p);
     if (!(p[PTX(va)] & PTE_P))
         return ~0;
-    cprintf("check_va2pa p[PTX(va)]: %08x\n", PTE_ADDR(p[PTX(va)]));
     return PTE_ADDR(p[PTX(va)]);
 }
 
@@ -777,10 +794,7 @@ check_page(void)
     // free pp0 and try again: pp0 should be used for page table
     page_free(pp0);
     assert(page_insert(kern_pgdir, pp1, 0x0, PTE_W) == 0);
-    cprintf("PTE_ADDR(kern_pgdir[0]): %08x, page2pa(pp0): %08x\n", PTE_ADDR(kern_pgdir[0]), page2pa(pp0));
     assert(PTE_ADDR(kern_pgdir[0]) == page2pa(pp0));
-    cprintf("check_va2pa(kern_pgdir, 0x0): %08x, page2pa(pp1): %08x, kern_pgdir: %08x, pp1: %08x\n", check_va2pa(kern_pgdir, 0x0), page2pa(pp1), kern_pgdir, pp1);
-    cprintf("pages: %08x\n", pages);
     assert(check_va2pa(kern_pgdir, 0x0) == page2pa(pp1));
     assert(pp1->pp_ref == 1);
     assert(pp0->pp_ref == 1);
