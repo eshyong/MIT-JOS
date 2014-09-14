@@ -131,7 +131,6 @@ mem_init(void)
     // create initial page directory.
     kern_pgdir = (pde_t *) boot_alloc(PGSIZE);
     memset(kern_pgdir, 0, PGSIZE);
-    cprintf("\nkern_pgdir: 0x%08x\n", kern_pgdir);
 
     //////////////////////////////////////////////////////////////////////
     // Recursively insert PD in itself as a page table, to form
@@ -148,8 +147,6 @@ mem_init(void)
     // each physical page, there is a corresponding struct PageInfo in this
     // array.  'npages' is the number of physical pages in memory.
     pages = (struct PageInfo *) boot_alloc(sizeof(struct PageInfo) * npages);
-    cprintf("sizeof(uintptr_t): %d\n", sizeof(uintptr_t));
-    cprintf("\npages: 0x%08x\n", pages);
 
     //////////////////////////////////////////////////////////////////////
     // Now that we've allocated the initial kernel data structures, we set
@@ -370,14 +367,12 @@ page_decref(struct PageInfo* pp)
 pte_t *
 pgdir_walk(pde_t *pgdir, const void *va, int create)
 {
-    cprintf("\nEntering pgdir_walk\n");
     struct PageInfo *new_page_table;
     pte_t *result;
     physaddr_t table_addr = 0x0;
 
     // Reference the page directory array.
     pde_t dir_entry = pgdir[PDX(va)];
-    cprintf("dir_entry: 0x%08x\n", dir_entry);
 
     // If page table is not found in the directory and create is set, try page_alloc().
     if (dir_entry & PTE_P) { 
@@ -395,17 +390,14 @@ pgdir_walk(pde_t *pgdir, const void *va, int create)
             return NULL;
         }
         // Increment reference count and set page directory to point to page table's physical address.
-        cprintf("new_page_table: 0x%08x\n", new_page_table);
         new_page_table->pp_ref++;
         table_addr = page2pa(new_page_table);
         pgdir[PDX(va)] = table_addr | PTE_P | PTE_W;
     }
-    cprintf("table_addr: 0x%08x\n", table_addr);
 
     // Since our table address is a physical address, we need to index into it using PTX times 
     // physaddr_t. This ensures that addresses are aligned on 2-byte boundaries.
     result = (pte_t *) KADDR(table_addr + sizeof(physaddr_t) * PTX(va));
-    cprintf("result: 0x%08x\n\n", result);
     return result;
 }
 
@@ -465,8 +457,14 @@ page_insert(pde_t *pgdir, struct PageInfo *pp, void *va, int perm)
     }
     if (*table_entry & PTE_P) {
         // Remove page from table before creating a new mapping.
-        page_remove(pgdir, va);
+        if (page_lookup(pgdir, va, NULL) == pp) {
+            pp->pp_ref--;
+        } else {
+            // Checks against accidentally removing the same page as we're inserting.
+            page_remove(pgdir, va);
+        }
     }
+    pgdir[PDX(va)] |= perm;
     *table_entry = page2pa(pp) | PTE_P | perm; 
     pp->pp_ref++;
 
@@ -519,14 +517,11 @@ page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
 void
 page_remove(pde_t *pgdir, void *va)
 {
-    cprintf("\nEntering page_remove\n");
     pte_t *table_entry;
     struct PageInfo *page = page_lookup(pgdir, va, &table_entry);
     if (page) {
         // Decrement/free page, reset table entry, and invalidate TLB entry.
-        cprintf("page: 0x%08x\n", page);
         page_decref(page);
-        cprintf("page_free_list: 0x%08x\n", page_free_list);
         *table_entry = 0x0;
         tlb_invalidate(pgdir, va);
     }
