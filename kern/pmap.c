@@ -161,7 +161,7 @@ mem_init(void)
     check_page();
 
     // Remove this line when you're ready to test this function.
-    panic("mem_init: This function is not finished\n");
+    //panic("mem_init: This function is not finished\n");
 
     //////////////////////////////////////////////////////////////////////
     // Now we set up virtual memory
@@ -173,6 +173,8 @@ mem_init(void)
     //      (ie. perm = PTE_U | PTE_P)
     //    - pages itself -- kernel RW, user NONE
     // Your code goes here:
+    size_t size = ROUNDUP(sizeof(struct PageInfo) * npages, PGSIZE);
+    boot_map_region(kern_pgdir, UPAGES, size, (physaddr_t) PADDR(pages), PTE_U | PTE_P);
 
     //////////////////////////////////////////////////////////////////////
     // Use the physical memory that 'bootstack' refers to as the kernel
@@ -185,6 +187,7 @@ mem_init(void)
     //       overwrite memory.  Known as a "guard page".
     //     Permissions: kernel RW, user NONE
     // Your code goes here:
+    // size = 
 
     //////////////////////////////////////////////////////////////////////
     // Map all of physical memory at KERNBASE.
@@ -194,6 +197,8 @@ mem_init(void)
     // we just set up the mapping anyway.
     // Permissions: kernel RW, user NONE
     // Your code goes here:
+    size = npages * PGSIZE;
+    boot_map_region(kern_pgdir, KERNBASE, size, (physaddr_t) 0x0, PTE_W | PTE_P);
 
     // Check that the initial page directory has been set up correctly.
     check_kern_pgdir();
@@ -323,7 +328,7 @@ page_free(struct PageInfo *pp)
 {
     // Check for invalid pages. 
     if (pp->pp_ref != 0 || pp->pp_link != NULL) {
-        panic("page_free called on invalid page");
+        panic("page_free called on invalid page: pp_ref is not 0 or pp_link is not NULL");
     }
     // Point to the free list and point page_free_list to pp.
     pp->pp_link = page_free_list;
@@ -415,8 +420,14 @@ static void
 boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm)
 {
     // Get a page table entry, then map it with permissions.
-    pte_t *tab_entry = pgdir_walk(pgdir, (void *) va, 1);
-    *tab_entry = PADDR((void *) va) | perm | PTE_P;
+    int create = 1;
+    uintptr_t addr = va;
+    size_t i;
+    for (i = 0; i < size; i += PGSIZE, addr += i) {
+        pte_t *table_entry = pgdir_walk(pgdir, (void *) addr, create);
+        *table_entry = (pa + i) | PTE_P | perm;
+        table_entry++;
+    }
 }
 
 //
@@ -455,18 +466,15 @@ page_insert(pde_t *pgdir, struct PageInfo *pp, void *va, int perm)
     if (table_entry == NULL) {
         return -E_NO_MEM;
     }
+    // Checks against accidentally removing the same page as we're inserting.
+    pp->pp_ref++;
     if (*table_entry & PTE_P) {
         // Remove page from table before creating a new mapping.
-        if (page_lookup(pgdir, va, NULL) == pp) {
-            pp->pp_ref--;
-        } else {
-            // Checks against accidentally removing the same page as we're inserting.
-            page_remove(pgdir, va);
-        }
+        page_remove(pgdir, va);
     }
-    pgdir[PDX(va)] |= perm;
+    // Map table entry, and add extra permissions to page directory.
     *table_entry = page2pa(pp) | PTE_P | perm; 
-    pp->pp_ref++;
+    pgdir[PDX(va)] |= perm;
 
     return 0;
 }
@@ -699,13 +707,14 @@ check_kern_pgdir(void)
 
     // check pages array
     n = ROUNDUP(npages*sizeof(struct PageInfo), PGSIZE);
-    for (i = 0; i < n; i += PGSIZE)
+    for (i = 0; i < n; i += PGSIZE) {
         assert(check_va2pa(pgdir, UPAGES + i) == PADDR(pages) + i);
-
+    }
 
     // check phys mem
-    for (i = 0; i < npages * PGSIZE; i += PGSIZE)
+    for (i = 0; i < npages * PGSIZE; i += PGSIZE) {
         assert(check_va2pa(pgdir, KERNBASE + i) == i);
+    }
 
     // check kernel stack
     for (i = 0; i < KSTKSIZE; i += PGSIZE)
