@@ -150,6 +150,7 @@ mem_init(void)
 	//////////////////////////////////////////////////////////////////////
 	// Make 'envs' point to an array of size 'NENV' of 'struct Env'.
 	// LAB 3: Your code here.
+    envs = (struct Env *) boot_alloc(sizeof(struct Env) * NENV);
     
     // panic("mem_init: This function is not finished\n");
 
@@ -201,6 +202,8 @@ mem_init(void)
 	//    - the new image at UENVS  -- kernel R, user R
 	//    - envs itself -- kernel RW, user NONE
 	// LAB 3: Your code here.
+    size = ROUNDUP(sizeof(struct Env) * NENV, PGSIZE);
+    boot_map_region(kern_pgdir, UENVS, size, (physaddr_t) PADDR(envs), PTE_U | PTE_P);
 
    //////////////////////////////////////////////////////////////////////
     // Map all of physical memory at KERNBASE.
