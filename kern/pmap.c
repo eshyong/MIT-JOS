@@ -151,7 +151,7 @@ mem_init(void)
 	// Make 'envs' point to an array of size 'NENV' of 'struct Env'.
 	// LAB 3: Your code here.
     
-    panic("mem_init: This function is not finished\n");
+    // panic("mem_init: This function is not finished\n");
 
     //////////////////////////////////////////////////////////////////////
     // Now that we've allocated the initial kernel data structures, we set
@@ -442,7 +442,7 @@ boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm
         // For every virtual address (va + i), map it to (pa + i).
         vaddr = va + i;
         paddr = pa + i;
-        table_entry = pgdir_walk(pgdir, (void *) addr, create);
+        table_entry = pgdir_walk(pgdir, (void *) vaddr, create);
         *table_entry = paddr | PTE_P | perm;
     }
 }
