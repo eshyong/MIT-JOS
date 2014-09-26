@@ -1,11 +1,9 @@
 /* See COPYRIGHT for copyright information. */
-
 #include <inc/x86.h>
 #include <inc/mmu.h>
 #include <inc/error.h>
 #include <inc/string.h>
 #include <inc/assert.h>
-
 #include <kern/pmap.h>
 #include <kern/kclock.h>
 
@@ -174,7 +172,7 @@ mem_init(void)
     //    - pages itself -- kernel RW, user NONE
     // Your code goes here:
     size_t size = ROUNDUP(sizeof(struct PageInfo) * npages, PGSIZE);
-    boot_map_region(kern_pgdir, UPAGES, size, (physaddr_t) PADDR(pages), PTE_U | PTE_P);
+    boot_map_region(kern_pgdir, UPAGES, size, (physaddr_t) PADDR(pages), PTE_U | PTE_W | PTE_P);
 
     //////////////////////////////////////////////////////////////////////
     // Use the physical memory that 'bootstack' refers to as the kernel
@@ -187,7 +185,8 @@ mem_init(void)
     //       overwrite memory.  Known as a "guard page".
     //     Permissions: kernel RW, user NONE
     // Your code goes here:
-    // size = 
+    size = KSTKSIZE;
+    boot_map_region(kern_pgdir, KSTACKTOP - KSTKSIZE, size, (physaddr_t) PADDR(bootstack), PTE_W | PTE_P);
 
     //////////////////////////////////////////////////////////////////////
     // Map all of physical memory at KERNBASE.
@@ -197,7 +196,7 @@ mem_init(void)
     // we just set up the mapping anyway.
     // Permissions: kernel RW, user NONE
     // Your code goes here:
-    size = npages * PGSIZE;
+    size = ~0 - KERNBASE;
     boot_map_region(kern_pgdir, KERNBASE, size, (physaddr_t) 0x0, PTE_W | PTE_P);
 
     // Check that the initial page directory has been set up correctly.
@@ -421,12 +420,16 @@ boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm
 {
     // Get a page table entry, then map it with permissions.
     int create = 1;
-    uintptr_t addr = va;
+    pte_t *table_entry;
+    uintptr_t vaddr = va;
+    uintptr_t paddr = pa;
     size_t i;
-    for (i = 0; i < size; i += PGSIZE, addr += i) {
-        pte_t *table_entry = pgdir_walk(pgdir, (void *) addr, create);
-        *table_entry = (pa + i) | PTE_P | perm;
-        table_entry++;
+    for (i = 0; i < size; i += PGSIZE) {
+        // For every virtual address (va + i), map it to (pa + i).
+        vaddr = va + i;
+        paddr = pa + i;
+        table_entry = pgdir_walk(pgdir, (void *) addr, create);
+        *table_entry = paddr | PTE_P | perm;
     }
 }
 
@@ -733,8 +736,9 @@ check_kern_pgdir(void)
             if (i >= PDX(KERNBASE)) {
                 assert(pgdir[i] & PTE_P);
                 assert(pgdir[i] & PTE_W);
-            } else
+            } else {
                 assert(pgdir[i] == 0);
+            }
             break;
         }
     }
