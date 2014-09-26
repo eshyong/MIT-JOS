@@ -6,6 +6,7 @@
 #include <inc/assert.h>
 #include <kern/pmap.h>
 #include <kern/kclock.h>
+#include <kern/env.h>
 
 // These variables are set by i386_detect_memory()
 size_t npages;            // Amount of physical memory (in pages)
@@ -146,6 +147,12 @@ mem_init(void)
     // array.  'npages' is the number of physical pages in memory.
     pages = (struct PageInfo *) boot_alloc(sizeof(struct PageInfo) * npages);
 
+	//////////////////////////////////////////////////////////////////////
+	// Make 'envs' point to an array of size 'NENV' of 'struct Env'.
+	// LAB 3: Your code here.
+    
+    panic("mem_init: This function is not finished\n");
+
     //////////////////////////////////////////////////////////////////////
     // Now that we've allocated the initial kernel data structures, we set
     // up the list of free physical pages. Once we've done so, all further
@@ -159,7 +166,6 @@ mem_init(void)
     check_page();
 
     // Remove this line when you're ready to test this function.
-    //panic("mem_init: This function is not finished\n");
 
     //////////////////////////////////////////////////////////////////////
     // Now we set up virtual memory
@@ -188,7 +194,15 @@ mem_init(void)
     size = KSTKSIZE;
     boot_map_region(kern_pgdir, KSTACKTOP - KSTKSIZE, size, (physaddr_t) PADDR(bootstack), PTE_W | PTE_P);
 
-    //////////////////////////////////////////////////////////////////////
+ 	//////////////////////////////////////////////////////////////////////
+	// Map the 'envs' array read-only by the user at linear address UENVS
+	// (ie. perm = PTE_U | PTE_P).
+	// Permissions:
+	//    - the new image at UENVS  -- kernel R, user R
+	//    - envs itself -- kernel RW, user NONE
+	// LAB 3: Your code here.
+
+   //////////////////////////////////////////////////////////////////////
     // Map all of physical memory at KERNBASE.
     // Ie.  the VA range [KERNBASE, 2^32) should map to
     //      the PA range [0, 2^32 - KERNBASE)
@@ -550,6 +564,51 @@ tlb_invalidate(pde_t *pgdir, void *va)
     invlpg(va);
 }
 
+static uintptr_t user_mem_check_addr;
+
+//
+// Check that an environment is allowed to access the range of memory
+// [va, va+len) with permissions 'perm | PTE_P'.
+// Normally 'perm' will contain PTE_U at least, but this is not required.
+// 'va' and 'len' need not be page-aligned; you must test every page that
+// contains any of that range.  You will test either 'len/PGSIZE',
+// 'len/PGSIZE + 1', or 'len/PGSIZE + 2' pages.
+//
+// A user program can access a virtual address if (1) the address is below
+// ULIM, and (2) the page table gives it permission.  These are exactly
+// the tests you should implement here.
+//
+// If there is an error, set the 'user_mem_check_addr' variable to the first
+// erroneous virtual address.
+//
+// Returns 0 if the user program can access this range of addresses,
+// and -E_FAULT otherwise.
+//
+int
+user_mem_check(struct Env *env, const void *va, size_t len, int perm)
+{
+	// LAB 3: Your code here.
+
+	return 0;
+}
+
+//
+// Checks that environment 'env' is allowed to access the range
+// of memory [va, va+len) with permissions 'perm | PTE_U | PTE_P'.
+// If it can, then the function simply returns.
+// If it cannot, 'env' is destroyed and, if env is the current
+// environment, this function will not return.
+//
+void
+user_mem_assert(struct Env *env, const void *va, size_t len, int perm)
+{
+	if (user_mem_check(env, va, len, perm | PTE_U) < 0) {
+		cprintf("[%08x] user_mem_check assertion failure for "
+			"va %08x\n", env->env_id, user_mem_check_addr);
+		env_destroy(env);	// may not return
+	}
+}
+
 
 // --------------------------------------------------------------
 // Checking functions.
@@ -703,46 +762,49 @@ check_page_alloc(void)
 static void
 check_kern_pgdir(void)
 {
-    uint32_t i, n;
-    pde_t *pgdir;
+	uint32_t i, n;
+	pde_t *pgdir;
 
-    pgdir = kern_pgdir;
+	pgdir = kern_pgdir;
 
-    // check pages array
-    n = ROUNDUP(npages*sizeof(struct PageInfo), PGSIZE);
-    for (i = 0; i < n; i += PGSIZE) {
-        assert(check_va2pa(pgdir, UPAGES + i) == PADDR(pages) + i);
-    }
+	// check pages array
+	n = ROUNDUP(npages*sizeof(struct PageInfo), PGSIZE);
+	for (i = 0; i < n; i += PGSIZE)
+		assert(check_va2pa(pgdir, UPAGES + i) == PADDR(pages) + i);
 
-    // check phys mem
-    for (i = 0; i < npages * PGSIZE; i += PGSIZE) {
-        assert(check_va2pa(pgdir, KERNBASE + i) == i);
-    }
+	// check envs array (new test for lab 3)
+	n = ROUNDUP(NENV*sizeof(struct Env), PGSIZE);
+	for (i = 0; i < n; i += PGSIZE)
+		assert(check_va2pa(pgdir, UENVS + i) == PADDR(envs) + i);
 
-    // check kernel stack
-    for (i = 0; i < KSTKSIZE; i += PGSIZE)
-        assert(check_va2pa(pgdir, KSTACKTOP - KSTKSIZE + i) == PADDR(bootstack) + i);
-    assert(check_va2pa(pgdir, KSTACKTOP - PTSIZE) == ~0);
+	// check phys mem
+	for (i = 0; i < npages * PGSIZE; i += PGSIZE)
+		assert(check_va2pa(pgdir, KERNBASE + i) == i);
 
-    // check PDE permissions
-    for (i = 0; i < NPDENTRIES; i++) {
-        switch (i) {
-        case PDX(UVPT):
-        case PDX(KSTACKTOP-1):
-        case PDX(UPAGES):
-            assert(pgdir[i] & PTE_P);
-            break;
-        default:
-            if (i >= PDX(KERNBASE)) {
-                assert(pgdir[i] & PTE_P);
-                assert(pgdir[i] & PTE_W);
-            } else {
-                assert(pgdir[i] == 0);
-            }
-            break;
-        }
-    }
-    cprintf("check_kern_pgdir() succeeded!\n");
+	// check kernel stack
+	for (i = 0; i < KSTKSIZE; i += PGSIZE)
+		assert(check_va2pa(pgdir, KSTACKTOP - KSTKSIZE + i) == PADDR(bootstack) + i);
+	assert(check_va2pa(pgdir, KSTACKTOP - PTSIZE) == ~0);
+
+	// check PDE permissions
+	for (i = 0; i < NPDENTRIES; i++) {
+		switch (i) {
+		case PDX(UVPT):
+		case PDX(KSTACKTOP-1):
+		case PDX(UPAGES):
+		case PDX(UENVS):
+			assert(pgdir[i] & PTE_P);
+			break;
+		default:
+			if (i >= PDX(KERNBASE)) {
+				assert(pgdir[i] & PTE_P);
+				assert(pgdir[i] & PTE_W);
+			} else
+				assert(pgdir[i] == 0);
+			break;
+		}
+	}
+	cprintf("check_kern_pgdir() succeeded!\n");
 }
 
 // This function returns the physical address of the page containing 'va',
