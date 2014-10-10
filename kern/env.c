@@ -114,8 +114,17 @@ envid2env(envid_t envid, struct Env **env_store, bool checkperm)
 void
 env_init(void)
 {
-	// Set up envs array
-	// LAB 3: Your code here.
+    // Create a linked list starting with envs[0] and ending with NULL, with 
+    // each entry pointing to the next sequential environment.
+    int i;
+    env_free_list = NULL;
+    cprintf("NENV - 1: %u\n", NENV - 1);
+    for (i = NENV - 1; i >= 0; i--) {
+        envs[i].env_id = 0;
+        envs[i].env_link = env_free_list;
+        env_free_list = &envs[i];
+    }
+    cprintf("env_free_list: 0x%08x, &envs[i]: 0x%08x\n", env_free_list, &envs[0]);
 
 	// Per-CPU part of the initialization
 	env_init_percpu();
@@ -156,11 +165,13 @@ static int
 env_setup_vm(struct Env *e)
 {
 	int i;
-	struct PageInfo *p = NULL;
+	struct PageInfo *p = page_alloc(ALLOC_ZERO);
 
 	// Allocate a page for the page directory
-	if (!(p = page_alloc(ALLOC_ZERO)))
+	if (!p) {
 		return -E_NO_MEM;
+    }
+    cprintf("env_setup_vm!\n");
 
 	// Now, set e->env_pgdir and initialize the page directory.
 	//
@@ -177,8 +188,11 @@ env_setup_vm(struct Env *e)
 	//	is an exception -- you need to increment env_pgdir's
 	//	pp_ref for env_free to work correctly.
 	//    - The functions in kern/pmap.h are handy.
+    cprintf("page: %08x", p);
 
 	// LAB 3: Your code here.
+    // Wat do????
+    e->env_pgdir = (pde_t *)p;
 
 	// UVPT maps the env's own page table read-only.
 	// Permissions: kernel R, user R
@@ -202,12 +216,14 @@ env_alloc(struct Env **newenv_store, envid_t parent_id)
 	int r;
 	struct Env *e;
 
-	if (!(e = env_free_list))
+	if (!(e = env_free_list)) {
 		return -E_NO_FREE_ENV;
+    }
 
 	// Allocate and set up the page directory for this environment.
-	if ((r = env_setup_vm(e)) < 0)
+	if ((r = env_setup_vm(e)) < 0) {
 		return r;
+    }
 
 	// Generate an env_id for this environment.
 	generation = (e->env_id + (1 << ENVGENSHIFT)) & ~(NENV - 1);
@@ -341,6 +357,15 @@ void
 env_create(uint8_t *binary, enum EnvType type)
 {
 	// LAB 3: Your code here.
+    struct Env *new_env;
+    envid_t parent_id = 0;
+    if (curenv != NULL) {
+        parent_id = curenv->env_id;
+    }
+    int error = env_alloc(&new_env, parent_id);
+    if (error != 0) {
+        panic("env_create %e\n", error);
+    }
 }
 
 //
