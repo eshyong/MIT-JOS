@@ -179,7 +179,7 @@ mem_init(void)
     //    - pages itself -- kernel RW, user NONE
     // Your code goes here:
     size_t size = ROUNDUP(sizeof(struct PageInfo) * npages, PGSIZE);
-    boot_map_region(kern_pgdir, UPAGES, size, (physaddr_t) PADDR(pages), PTE_U | PTE_W | PTE_P);
+    boot_map_region(kern_pgdir, UPAGES, size, (physaddr_t) PADDR(pages), PTE_W);
 
     //////////////////////////////////////////////////////////////////////
     // Use the physical memory that 'bootstack' refers to as the kernel
@@ -193,7 +193,7 @@ mem_init(void)
     //     Permissions: kernel RW, user NONE
     // Your code goes here:
     size = KSTKSIZE;
-    boot_map_region(kern_pgdir, KSTACKTOP - KSTKSIZE, size, (physaddr_t) PADDR(bootstack), PTE_W | PTE_P);
+    boot_map_region(kern_pgdir, KSTACKTOP - KSTKSIZE, size, (physaddr_t) PADDR(bootstack), PTE_W);
 
  	//////////////////////////////////////////////////////////////////////
 	// Map the 'envs' array read-only by the user at linear address UENVS
@@ -214,7 +214,7 @@ mem_init(void)
     // Permissions: kernel RW, user NONE
     // Your code goes here:
     size = ~0 - KERNBASE;
-    boot_map_region(kern_pgdir, KERNBASE, size, (physaddr_t) 0x0, PTE_W | PTE_P);
+    boot_map_region(kern_pgdir, KERNBASE, size, (physaddr_t) 0x0, PTE_W);
 
     // Check that the initial page directory has been set up correctly.
     check_kern_pgdir();
