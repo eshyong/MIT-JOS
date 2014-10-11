@@ -191,7 +191,7 @@ env_setup_vm(struct Env *e)
     cprintf("page: 0x%08x\n", p);
     // Increment pp_ref, copy contents of kern_pgdir into page_dir, and finally
     // use the physical page as a directory. 
-    p->pp_ref++;
+    p->pp_ref += 1;
     pde_t *page_dir = page2kva(p);
     memcpy(page_dir, kern_pgdir, PGSIZE);
     e->env_pgdir = page_dir;
@@ -285,6 +285,31 @@ region_alloc(struct Env *e, void *va, size_t len)
 	//   'va' and 'len' values that are not page-aligned.
 	//   You should round va down, and round (va + len) up.
 	//   (Watch out for corner-cases!)
+    
+
+    // Allocate len bytes. We use page_alloc for this, and calculate the size needed
+    // using lower and upper bounds [va, va + len), both aligned to page boundaries.
+    void *lower = ROUNDDOWN(va + len, PGSIZE);
+    void *upper = ROUNDUP(va, PGSIZE);
+    size_t n = (size_t) (upper - lower);
+    size_t i;
+
+    for (i = 0; i < n; i++) {
+        // Allocate a page and increment its reference count.
+        int error;
+        struct PageInfo *page = page_alloc(0);
+        if (!page) {
+            error = -E_NO_MEM;
+            panic("region_alloc page_alloc: %e\n", error);
+        }
+        page->pp_ref += 1;
+
+        // Map region using page_insert.
+        error = page_insert(e->env_pgdir, page, va + PGSIZE, PTE_W | PTE_U);
+        if (error != 0) {
+            cprintf("region_alloc page_insert: %e\n", error);
+        }
+    }
 }
 
 //
