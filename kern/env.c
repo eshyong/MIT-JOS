@@ -188,11 +188,13 @@ env_setup_vm(struct Env *e)
 	//	is an exception -- you need to increment env_pgdir's
 	//	pp_ref for env_free to work correctly.
 	//    - The functions in kern/pmap.h are handy.
-    cprintf("page: %08x", p);
-
-	// LAB 3: Your code here.
-    // Wat do????
-    e->env_pgdir = (pde_t *)p;
+    cprintf("page: 0x%08x\n", p);
+    // Increment pp_ref, copy contents of kern_pgdir into page_dir, and finally
+    // use the physical page as a directory. 
+    p->pp_ref++;
+    pde_t *page_dir = page2kva(p);
+    memcpy(page_dir, kern_pgdir, PGSIZE);
+    e->env_pgdir = page_dir;
 
 	// UVPT maps the env's own page table read-only.
 	// Permissions: kernel R, user R
