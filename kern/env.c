@@ -366,6 +366,24 @@ load_icode(struct Env *e, uint8_t *binary)
 	//  What?  (See env_run() and env_pop_tf() below.)
 
 	// LAB 3: Your code here.
+    cprintf("load_icode START\n");
+    struct Proghdr *ph;
+    struct Elf *elf_hdr = (struct Elf *) binary;
+    cprintf("elf_hdr->e_magic: %08x\n", elf_hdr->e_magic);
+
+    // Check if we have a valid binary.
+    if (elf_hdr->e_magic != ELF_MAGIC) {
+        panic("load_icode called with invalid ELF header\n");
+    }
+
+    ph = (struct Proghdr *) ((uint8_t *) elf_hdr + elf_hdr->e_phoff);
+    cprintf("ph->p_type: %08x\n", ph->p_type);
+    if (ph->p_type != ELF_PROG_LOAD) {
+        panic("Program type is not loadable\n");
+    }
+    cprintf("ph->p_va: %08x\n", ph->p_va);
+    cprintf("ph->p_memsz: %08x\n", ph->p_memsz);
+    cprintf("binary + ph->p_offset: %08x\n", binary + ph->p_offset);
 
 	// Now map one page for the program's initial stack
 	// at virtual address USTACKTOP - PGSIZE.
@@ -393,6 +411,8 @@ env_create(uint8_t *binary, enum EnvType type)
     if (error != 0) {
         panic("env_create %e\n", error);
     }
+    cprintf("binary: 0x%08x\n", binary);
+    load_icode(new_env, binary);
 }
 
 //
