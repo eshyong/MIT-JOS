@@ -289,27 +289,29 @@ region_alloc(struct Env *e, void *va, size_t len)
 
     // Allocate len bytes. We use page_alloc for this, and calculate the size needed
     // using lower and upper bounds [va, va + len), both aligned to page boundaries.
-    void *lower = ROUNDDOWN(va + len, PGSIZE);
-    void *upper = ROUNDUP(va, PGSIZE);
-    size_t n = (size_t) (upper - lower);
-    size_t i;
-
-    for (i = 0; i < n; i++) {
+    void *upper = ROUNDUP(va + len, PGSIZE);
+    void *new_page_va = ROUNDDOWN(va, PGSIZE);
+    for (; new_page_va < upper; new_page_va += PGSIZE) {
         // Allocate a page and increment its reference count.
-        int error;
         struct PageInfo *page = page_alloc(0);
         if (!page) {
-            error = -E_NO_MEM;
-            panic("region_alloc page_alloc: %e\n", error);
+            // Error handling
+            cprintf("region_alloc page_alloc: ");
+            goto out_of_memory;
         }
         page->pp_ref += 1;
 
         // Map region using page_insert.
-        error = page_insert(e->env_pgdir, page, va + PGSIZE, PTE_W | PTE_U);
+        error = page_insert(e->env_pgdir, page, new_page_va, PTE_W | PTE_U);
         if (error != 0) {
-            cprintf("region_alloc page_insert: %e\n", error);
+            cprintf("region_alloc page_insert: ");
+            goto out_of_memory;
         }
     }
+    return;
+out_of_memory:
+    // TODO: Free all pages allocated before panicking, if out of memory.
+    panic("%e\n", -E_NO_MEM);
 }
 
 //
